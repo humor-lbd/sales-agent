@@ -1,0 +1,23 @@
+# 文件作用：列出后端运行和测试依赖，帮助环境复现保持一致。
+# 阅读这个文件时，建议先看分组，再看每个配置项会影响哪一层能力。
+
+# Web 服务依赖：负责对外提供 HTTP 接口和文档。
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+# 数据访问依赖：负责连接 MySQL 并组织查询。
+sqlalchemy==2.0.43
+pymysql==1.1.1
+pydantic==2.11.7
+pydantic-settings==2.10.1
+# 缓存依赖：负责减少重复查询和重复计算。
+redis==6.4.0
+# 鉴权依赖：负责生成和解析 JWT 令牌。
+python-jose[cryptography]==3.5.0
+httpx==0.28.1
+# 模型与 Agent 依赖：负责调用大模型并编排推理流程。
+openai==2.31.0
+langgraph==1.1.3
+langchain-openai==1.1.11
+# 测试依赖：负责运行自动化测试并验证回归情况。
+pytest==8.4.1
+pytest-asyncio==1.1.0

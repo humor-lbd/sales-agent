@@ -1,0 +1,570 @@
+# sales-agent LangGraph 改 ReAct 文件级改造清单
+
+## 改造目标
+
+把当前基于显式节点编排的 `planner -> executor -> chart_builder -> formatter` 模式，改成以 ReAct Agent 为核心的执行框架，同时尽量保留现有项目已经稳定的能力：
+
+- FastAPI 接口协议保持兼容
+- 会话记忆继续走 `MemoryService`
+- 权限控制继续复用 `SalesTools / SalesQueryService`
+- 图表继续输出结构化 `artifacts`
+- 同步接口先跑通，再改流式接口
+
+## 总体改造策略
+
+不建议一次性删除现有图节点，建议采用“外层流程保留，内核替换为 ReAct”的方式：
+
+1. 保留：
+   - `bootstrap`
+   - `load_memory`
+   - `guardrails`
+   - `persist_memory`
+2. 替换：
+   - `planner`
+   - `executor`
+   - `chart_builder`
+   - `formatter`
+3. 新增：
+   - `react_prep`
+   - `react_tools`
+   - `extract_result`
+   - `react_state`
+4. 第一阶段保留旧图和旧节点，允许新旧双轨切换。
+
+推荐主流程：
+
+`bootstrap -> load_memory -> guardrails -> react_prep -> react_agent -> extract_result -> persist_memory`
+
+## 文件级改造清单
+
+### 1. `app/graph/builder.py`
+
+改造目标：
+
+- 保留旧的 `_build_graph()` 作为兼容实现
+- 新增 `_build_react_graph()` 或 `get_sales_react_graph()`
+- 用 `create_react_agent(...)` 生成 ReAct 核心图
+- 外层再包一层 `StateGraph`，把 `react_prep`、`extract_result`、`persist_memory` 串起来
+
+建议修改点：
+
+- 新增 ReAct 图构建函数
+- 增加是否启用 ReAct 的开关入口
+- 保留 `get_sales_graph()` 旧接口，避免一次性影响所有调用方
+
+建议结果：
+
+- `get_sales_graph()` 可继续指向旧图
+- 新增 `get_sales_react_graph()`
+- 等验证通过后，再让 `SalesAgent` 默认切到 ReAct 图
+
+### 2. `app/graph/state.py`
+
+改造目标：
+
+- 当前 `GraphState` 偏“规划执行型”
+- ReAct 需要真正的消息追加状态
+
+建议处理方式：
+
+- 保留现有 `GraphState`
+- 新增 ReAct 专用状态，例如：
+  - `messages`
+  - `session_id`
+  - `request_text`
+  - `artifacts`
+  - `final_answer`
+  - `error`
+  - `rejected`
+  - `tool_trace`（可选，调试用）
+
+建议新增文件：
+
+- `app/graph/react_state.py`
+
+建议结构：
+
+- `messages` 使用 `add_messages`
+- `messages` 类型用 `list[AnyMessage]`
+- 不再把核心规划字段作为主状态中心
+
+原因：
+
+- ReAct 会在图中不断生成 `AIMessage` 和 `ToolMessage`
+- 这时必须支持追加，而不是当前项目这种“整体覆盖历史快照”
+
+### 3. `app/graph/context.py`
+
+改造目标：
+
+- 尽量不改
+
+建议处理方式：
+
+- 保持 `AgentContext` 不变
+
+继续复用字段：
+
+- `current_user`
+- `settings`
+- `tools`
+- `memory_service`
+- `today`
+- `request_id`
+
+原因：
+
+- ReAct 节点和工具都还需要这些运行时依赖
+- `ToolRuntime.context` 可以直接拿到这些字段
+
+### 4. `app/graph/prompts.py`
+
+改造目标：
+
+- 保留现有 `PLANNER_SYSTEM_PROMPT` 和 `FORMATTER_SYSTEM_PROMPT`
+- 新增统一的 `REACT_SYSTEM_PROMPT`
+
+建议新增内容：
+
+- 角色定义：销售数据分析助手
+- 能力边界：只允许销售分析，不允许写数据、不允许预测
+- 行为要求：先理解问题，再按需调用工具，不允许编造数据
+- 图表规范：如需图表，必须调用图表工具，最终图表走 `artifacts`
+- 输出规范：最终回复简洁、专业、自然，不输出原始 JSON
+
+建议新增常量：
+
+- `REACT_SYSTEM_PROMPT`
+- 如需拆分，也可增加 `REACT_RESULT_STYLE_PROMPT`
+
+### 5. `app/graph/helpers.py`
+
+改造目标：
+
+- 保留现有 `build_chat_model()`
+- 增加 ReAct 需要的消息转换辅助函数
+
+建议新增能力：
+
+- 把历史 `messages: list[dict]` 转成 LangChain 消息对象
+- 把当前 `request_text` 封装成 `HumanMessage`
+- 将最终 ReAct 输出提取为普通文本
+- 从工具返回中提取 `artifact / artifacts`
+
+建议新增函数：
+
+- `to_lc_messages(history: list[dict])`
+- `build_react_input_messages(history: list[dict], request_text: str)`
+- `extract_final_ai_text(messages)`
+- `collect_artifacts_from_messages(messages)`
+
+### 6. `app/graph/nodes/bootstrap.py`
+
+改造目标：
+
+- 基本可复用
+
+建议修改点：
+
+- 如果切 ReAct 状态，需要把 `messages` 初始化为空列表
+- 如果新增 `tool_trace` 或 `react_result` 字段，也在这里补默认值
+
+总体建议：
+
+- 小改即可，不用重写
+
+### 7. `app/graph/nodes/memory.py`
+
+改造目标：
+
+- 继续负责加载和持久化会话历史
+
+建议修改点：
+
+- `load_memory_node` 继续从 `MemoryService` 读取原始历史
+- 新增一个转换步骤，把历史 dict 转成 ReAct 能接受的消息对象
+- `persist_memory_node` 不要把完整 ReAct scratchpad 全量写回
+
+持久化建议：
+
+只落库：
+
+- 用户输入
+- 最终 assistant 回复
+- `artifacts`（如有）
+
+不要默认落库：
+
+- Tool 调用消息
+- Tool observation
+- 中间思维链
+
+原因：
+
+- 避免历史污染
+- 避免会话越来越长
+- 避免前端和后端后续提示词失控
+
+### 8. `app/graph/nodes/guardrails.py`
+
+改造目标：
+
+- 保留
+
+原因：
+
+- ReAct 更自由，越需要在进入 agent 前做硬拦截
+
+建议修改点：
+
+- 逻辑基本不变
+- 如有需要，可增加更严格的业务边界判定
+
+### 9. `app/graph/nodes/planner.py`
+
+处理建议：
+
+- 第一阶段保留，不再作为主流程节点
+- 第二阶段等 ReAct 跑稳后，可以废弃或转为 fallback 工具
+
+可选保留方式：
+
+- 作为复杂问题的预解析器
+- 或作为 debug 模式下的对照实现
+
+### 10. `app/graph/nodes/executor.py`
+
+处理建议：
+
+- 第一阶段保留，不再挂主图
+- 第二阶段可以拆成多个 tool 的内部实现来源
+
+迁移思路：
+
+- 不让 ReAct 直接调用 `executor_node`
+- 而是把 `executor_node` 里的业务分支逻辑拆回 tool 层
+
+### 11. `app/graph/nodes/chart_builder.py`
+
+处理建议：
+
+- 不再作为主图节点
+- 图表生成逻辑迁移到单独的 tool
+
+建议新增工具：
+
+- `build_chart`
+
+输入：
+
+- 图表类型
+- 标题
+- 行数据 / 分组数据
+
+输出：
+
+- 结构化 `artifact`
+- 或 `artifacts`
+
+原因：
+
+- 在 ReAct 模式下，图表是“工具调用结果”的一部分
+- 不再适合由固定图节点总是串行处理
+
+### 12. `app/graph/nodes/formatter.py`
+
+处理建议：
+
+- 第一阶段不再作为主节点
+- 最终自然语言回答尽量交给 ReAct Agent 直接产出
+
+保留价值：
+
+- 可作为 fallback：当 ReAct 最后文本为空时，兜底生成结果
+
+### 13. `app/graph/router.py`
+
+处理建议：
+
+- 原有基于 `need_chart`、`rejected` 的路由逻辑会被弱化
+- `rejected` 分支可以保留
+- `executor -> chart_builder -> formatter` 的旧路由可逐步废弃
+
+### 14. 新增 `app/graph/react_tools.py`
+
+这是本次改造的核心新增文件。
+
+改造目标：
+
+- 把现有 `SalesTools` 封装成一组更适合 ReAct 选择的工具
+
+建议不要直接暴露太多细碎工具，优先收敛为 6 到 8 个：
+
+- `sales_summary`
+- `order_query`
+- `ranking_query`
+- `trend_query`
+- `growth_analysis`
+- `anomaly_detection`
+- `build_chart`
+- `clear_chart_request`（可选）
+
+工具实现建议：
+
+- 使用 `@tool`
+- 通过 `runtime: ToolRuntime` 获取：
+  - `runtime.context["tools"]`
+  - `runtime.context["today"]`
+  - `runtime.context["current_user"]`
+
+原因：
+
+- 不把 `SalesTools` 写死进全局闭包
+- 避免图缓存后拿到旧实例
+- 支持每次请求注入当前用户和当前服务对象
+
+### 15. 新增 `app/graph/nodes/react_prep.py`
+
+改造目标：
+
+- 在进入 ReAct agent 前，把已有历史和当前请求拼成 `messages`
+
+建议职责：
+
+- 读取 `state["messages"]` 中的历史快照
+- 转为 LangChain 消息对象
+- 追加当前用户本轮输入
+- 返回标准 ReAct 输入状态
+
+### 16. 新增 `app/graph/nodes/extract_result.py`
+
+这是另一个关键新增文件。
+
+改造目标：
+
+- 把 ReAct agent 输出适配成当前项目已有响应协议
+
+建议职责：
+
+- 从最终 `messages` 中找最后一条 AI 回复
+- 提取 `final_answer`
+- 从工具消息或工具返回里提取 `artifact / artifacts`
+- 整理为：
+  - `final_answer`
+  - `artifacts`
+  - `error`
+
+原因：
+
+- 当前前端依赖的是 `reply + artifacts`
+- ReAct 原始输出不能直接拿来作为现有接口响应
+
+### 17. `app/logic/agent.py`
+
+这是主接线文件，必须重点改。
+
+改造目标：
+
+- 保持对外接口不变
+- 内部切换到 ReAct 图
+
+建议修改点：
+
+- 初始化阶段引入：
+  - `self.graph = get_sales_react_graph()` 或按开关切换
+- `_build_context()` 保持不变
+- `_run_graph()` 继续复用
+- `chat()` 先改同步 ReAct 版本
+- `chat_stream()` 分两阶段改
+
+流式建议：
+
+第一阶段：
+
+- `chat_stream()` 先仍可走旧流式逻辑
+- 或直接把同步结果切块输出，先保证功能正确
+
+第二阶段：
+
+- 接 ReAct agent 的消息流 / token 流
+- 把文本事件继续映射为 `token`
+- 把图表事件映射为 `artifacts`
+
+### 18. `app/api/routes.py`
+
+改造目标：
+
+- 对前端接口尽量无感
+
+建议修改点：
+
+- 尽量不改路由结构
+- 只要 `build_agent()` 返回的新 `SalesAgent` 内部已经切换到 ReAct 即可
+
+可以增加的内容：
+
+- 调试接口，例如：
+  - `POST /agent/chat?mode=react`
+  - 或通过配置切换
+
+但第一版不建议把接口层改复杂
+
+### 19. `app/logic/tools.py`
+
+改造目标：
+
+- 尽量保留原有业务工具
+- 作为 ReAct tools 的底层实现来源
+
+建议处理方式：
+
+- 不直接删
+- ReAct tool 包装层内部继续调用现有 `SalesTools`
+
+这样改造成本最低，也能继续复用：
+
+- 权限过滤
+- 查询封装
+- 图表基础构造
+- 异常检测逻辑
+
+### 20. `tests/`
+
+需要新增或改造以下测试：
+
+- `tests/test_react_tools.py`
+  - 验证每个 ReAct tool 的输入输出
+- `tests/test_react_graph.py`
+  - 验证 ReAct 图能跑通典型问题
+- `tests/test_agent.py`
+  - 增加同步 ReAct 场景
+- `tests/test_api.py`
+  - 验证 `/agent/chat` 响应结构不变
+
+推荐覆盖的典型问题：
+
+- 本月华东区销售额汇总
+- 近 6 个月销售趋势并画折线图
+- 第四季度大区销售排名并画柱状图
+- 查询订单明细
+- 同比/环比分析
+- 异常检测
+- 写操作请求拦截
+- 预测类请求拦截
+
+## 分阶段实施顺序
+
+### 阶段一：搭框架，不切主流程
+
+目标：
+
+- 新增 ReAct 状态
+- 新增 ReAct tools
+- 新增 `react_prep` 和 `extract_result`
+- 新增 `get_sales_react_graph()`
+
+产出：
+
+- 新旧两套图都能编译
+
+### 阶段二：同步接口切到 ReAct
+
+目标：
+
+- `chat()` 走新图
+- 保持返回结构兼容
+
+验收标准：
+
+- 现有前端无需改动即可工作
+- 基本问答和图表问题能正确返回
+
+### 阶段三：流式接口切换
+
+目标：
+
+- `chat_stream()` 对接 ReAct 结果流
+
+验收标准：
+
+- token 事件连续输出
+- artifacts 单独返回
+- done / error 协议不变
+
+### 阶段四：清理旧节点
+
+目标：
+
+- 当 ReAct 稳定后，再决定是否移除：
+  - `planner.py`
+  - `executor.py`
+  - `chart_builder.py`
+  - `formatter.py`
+  - `router.py`
+
+建议：
+
+- 不要在第一轮就删除
+- 至少保留一个可回退版本
+
+## 风险点
+
+### 1. 工具粒度过细
+
+风险：
+
+- 模型更容易选错工具
+
+建议：
+
+- 用更高层的业务工具，而不是暴露大量底层函数
+
+### 2. 图表协议被破坏
+
+风险：
+
+- 前端无法继续消费 `artifacts`
+
+建议：
+
+- ReAct 中所有图表输出都统一走结构化工具返回
+
+### 3. ReAct 消息全量入库
+
+风险：
+
+- 历史被 tool 调用污染
+- 提示词越来越长
+
+建议：
+
+- 只持久化最终用户消息和最终回复
+
+### 4. 流式复杂度上升
+
+风险：
+
+- 工具调用和最终回复混在一起，前端状态难维护
+
+建议：
+
+- 第一版先跑通同步
+- 流式后置
+
+## 推荐实施结论
+
+最稳妥的改法不是“把整个 sales-agent 一次性改成纯 ReAct”，而是：
+
+1. 保留现有外层节点和接口协议
+2. 新增 ReAct 核心图
+3. 先切同步
+4. 再切流式
+5. 最后再决定是否删除旧实现
+
+这样能最大程度复用当前项目已有的：
+
+- 会话记忆
+- 数据权限
+- 结构化图表
+- FastAPI 接口
+- 前端展示协议
