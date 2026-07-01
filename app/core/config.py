@@ -64,6 +64,23 @@ class Settings(BaseSettings):
     agent_memory_summary_messages: int = Field(default=6, alias="AGENT_MEMORY_SUMMARY_MESSAGES", description="更早历史压缩成摘要时最多保留的消息条数")
     agent_memory_summary_chars: int = Field(default=80, alias="AGENT_MEMORY_SUMMARY_CHARS", description="单条摘要消息最多保留的字符数")
 
+    # LLM SQL配置
+    llm_sql_enabled: bool = Field(default=False, alias="LLM_SQL_ENABLED", description="是否启用LLM生成SQL")
+    llm_sql_shadow_mode: bool = Field(default=True, alias="LLM_SQL_SHADOW_MODE", description="是否只执行影子对比，不使用LLM SQL结果")
+    llm_sql_model: str = Field(default="", alias="LLM_SQL_MODEL", description="SQL生成模型，留空时复用OPENAI_MODEL")
+    llm_sql_temperature: float = Field(default=0.0, alias="LLM_SQL_TEMPERATURE", description="SQL生成温度")
+    llm_sql_repair_attempts: int = Field(default=1, alias="LLM_SQL_REPAIR_ATTEMPTS", description="SQL生成失败后的修复次数")
+    llm_sql_max_rows: int = Field(default=200, alias="LLM_SQL_MAX_ROWS", description="LLM SQL最大返回行数")
+    llm_sql_timeout_seconds: int = Field(default=5, alias="LLM_SQL_TIMEOUT_SECONDS", description="LLM SQL执行超时时间")
+    llm_sql_use_fallback: bool = Field(default=True, alias="LLM_SQL_USE_FALLBACK", description="LLM SQL失败时是否回退确定性查询")
+    llm_sql_allowed_operations: str = Field(default="", alias="LLM_SQL_ALLOWED_OPERATIONS", description="允许走LLM SQL的操作名，逗号分隔；为空时允许全部")
+    llm_sql_cache_enabled: bool = Field(default=True, alias="LLM_SQL_CACHE_ENABLED", description="是否启用LLM SQL结构缓存")
+    llm_sql_cache_ttl_seconds: int = Field(default=3600, alias="LLM_SQL_CACHE_TTL_SECONDS", description="LLM SQL结构缓存TTL")
+    llm_sql_cache_backend: str = Field(default="memory", alias="LLM_SQL_CACHE_BACKEND", description="LLM SQL结构缓存后端：memory/redis")
+    llm_sql_prompt_profile: str = Field(default="compact", alias="LLM_SQL_PROMPT_PROFILE", description="LLM SQL prompt 风格：full/compact")
+    llm_sql_template_mode: bool = Field(default=True, alias="LLM_SQL_TEMPLATE_MODE", description="是否优先使用受控 SQL 模板")
+    llm_sql_audit_log_enabled: bool = Field(default=True, alias="LLM_SQL_AUDIT_LOG_ENABLED", description="是否启用结构化 SQL 审计日志")
+
     # 业务配置
     anomaly_threshold_days: int = Field(default=5, alias="ANOMALY_THRESHOLD_DAYS", description="异常检测阈值（天）")
     trend_drop_threshold: float = Field(default=0.3, alias="TREND_DROP_THRESHOLD", description="趋势下降阈值（比例）")
@@ -91,6 +108,16 @@ class Settings(BaseSettings):
         """
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    @property
+    def llm_sql_allowed_operation_set(self) -> set[str]:
+        """
+        解析允许走 LLM SQL 的操作集合。
+        """
+        raw = (self.llm_sql_allowed_operations or "").strip()
+        if not raw:
+            return set()
+        return {item.strip() for item in raw.split(",") if item.strip()}
 
 
 @lru_cache

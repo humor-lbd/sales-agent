@@ -35,6 +35,9 @@ class FakeRep:
 
 # 定义类 FakeAnomalyService，把当前文件相关的状态或能力封装起来，便于在其他模块中复用。
 class FakeAnomalyService:
+    def __init__(self) -> None:
+        pass
+
     def regions(self):
         """
         作用：执行regions对应的业务逻辑。
@@ -44,14 +47,17 @@ class FakeAnomalyService:
         return [FakeRegion(id=1, name="华东区")]
 
     def query_order_count(self, region_id, start, end):
+        raise AssertionError("异常检测不应再走逐区域 query_order_count")
+
+    def query_order_count_map(self, start, end):
         """
-        作用：执行query_order_count对应的业务逻辑。
-        参数：region_id、start、end。
+        作用：执行query_order_count_map对应的业务逻辑。
+        参数：start、end。
         返回：函数执行后的结果。
         """
         if start >= date.today() - timedelta(weeks=2):
-            return 1
-        return 10
+            return {1: 1}
+        return {1: 10}
 
     def active_products(self):
         """
@@ -62,12 +68,15 @@ class FakeAnomalyService:
         return [FakeProduct(id=1, name="智能音箱", sku_code="SKU-2001")]
 
     def query_last_order_date(self, product_id):
+        raise AssertionError("异常检测不应再走逐产品 query_last_order_date")
+
+    def query_last_order_date_map(self):
         """
-        作用：执行query_last_order_date对应的业务逻辑。
-        参数：product_id。
+        作用：执行query_last_order_date_map对应的业务逻辑。
+        参数：无。
         返回：函数执行后的结果。
         """
-        return date.today() - timedelta(days=10)
+        return {1: date.today() - timedelta(days=10)}
 
     def query_refund_rates(self, start, end):
         """
@@ -94,14 +103,17 @@ class FakeAnomalyService:
         return [FakeRep(id=1, name="李雷")]
 
     def sum_amount_by_rep(self, rep_id, start, end):
+        raise AssertionError("异常检测不应再走逐销售员 sum_amount_by_rep")
+
+    def sum_amount_by_rep_map(self, start, end):
         """
-        作用：执行sum_amount_by_rep对应的业务逻辑。
-        参数：rep_id、start、end。
+        作用：执行sum_amount_by_rep_map对应的业务逻辑。
+        参数：start、end。
         返回：函数执行后的结果。
         """
         if start >= date.today() - timedelta(days=30):
-            return Decimal("100")
-        return Decimal("500")
+            return {1: Decimal("100")}
+        return {1: Decimal("500")}
 
     @staticmethod
     def calc_growth_rate(current, previous):
@@ -130,3 +142,15 @@ def test_detect_all_anomalies_contains_expected_types():
     assert "产品连续零销售" in result
     assert "销售员退单率异常" in result
     assert "销售员业绩骤降" in result
+
+
+def test_detect_all_anomalies_prefers_batched_queries():
+    """
+    作用：验证异常检测优先走批量聚合接口，不再逐个对象回库查询。
+    参数：无。
+    返回：无。
+    """
+    service = FakeAnomalyService()
+    tools = SalesTools(service)
+
+    tools.detect_all_anomalies()

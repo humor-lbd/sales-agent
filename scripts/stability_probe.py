@@ -14,15 +14,7 @@ import uuid
 import httpx
 from sqlalchemy import create_engine, text
 
-
-# 定义函数 build_headers，负责组装当前步骤需要的对象或参数。
-def build_headers(token: str | None) -> dict[str, str]:
-    """
-    作用：构建headers对象或结构。
-    参数：token。
-    返回：函数执行后的结果。
-    """
-    return {"Authorization": f"Bearer {token}"} if token else {}
+from _common import build_headers
 
 
 # 定义函数 percentile_95，负责当前文件中的一个关键步骤或对外能力。

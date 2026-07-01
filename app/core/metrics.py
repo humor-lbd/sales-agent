@@ -118,6 +118,23 @@ class RuntimeMetrics:
                 lambda: {"count": 0, "total_ms": 0.0, "max_ms": 0.0}
             )
 
+            # LLM SQL统计：校验、执行与回退情况。
+            self.llm_sql = {
+                "validation_success": 0,
+                "validation_failed": 0,
+                "execution_success": 0,
+                "execution_failed": 0,
+                "fallbacks": 0,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "generated_prompt_tokens": 0,
+                "generated_completion_tokens": 0,
+                "generated_total_tokens": 0,
+                "template_hits": 0,
+                "execution_total_ms": 0.0,
+                "max_execution_ms": 0.0,
+            }
+
     def record_request(self, method: str, path: str, status_code: int, duration_ms: float) -> None:
         """
         记录HTTP请求指标
@@ -216,6 +233,68 @@ class RuntimeMetrics:
             bucket["total_ms"] += duration_ms
             bucket["max_ms"] = max(bucket["max_ms"], duration_ms)
 
+    def record_llm_sql_validation(self, ok: bool) -> None:
+        """
+        记录LLM SQL校验结果。
+        
+        Args:
+            ok: 校验是否通过
+        """
+        with self._lock:
+            if ok:
+                self.llm_sql["validation_success"] += 1
+            else:
+                self.llm_sql["validation_failed"] += 1
+
+    def record_llm_sql_execution(self, ok: bool, duration_ms: float) -> None:
+        """
+        记录LLM SQL执行结果。
+        
+        Args:
+            ok: 执行是否成功
+            duration_ms: 执行耗时
+        """
+        with self._lock:
+            if ok:
+                self.llm_sql["execution_success"] += 1
+            else:
+                self.llm_sql["execution_failed"] += 1
+            self.llm_sql["execution_total_ms"] += duration_ms
+            self.llm_sql["max_execution_ms"] = max(self.llm_sql["max_execution_ms"], duration_ms)
+
+    def record_llm_sql_fallback(self) -> None:
+        """
+        记录LLM SQL回退到确定性查询。
+        """
+        with self._lock:
+            self.llm_sql["fallbacks"] += 1
+
+    def record_llm_sql_cache(self, hit: bool) -> None:
+        """
+        记录 LLM SQL 模板缓存命中情况。
+        """
+        with self._lock:
+            if hit:
+                self.llm_sql["cache_hits"] += 1
+            else:
+                self.llm_sql["cache_misses"] += 1
+
+    def record_llm_sql_tokens(self, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> None:
+        """
+        记录 LLM SQL token 消耗。
+        """
+        with self._lock:
+            self.llm_sql["generated_prompt_tokens"] += int(prompt_tokens)
+            self.llm_sql["generated_completion_tokens"] += int(completion_tokens)
+            self.llm_sql["generated_total_tokens"] += int(total_tokens)
+
+    def record_llm_sql_template_hit(self) -> None:
+        """
+        记录 SQL 模板命中次数。
+        """
+        with self._lock:
+            self.llm_sql["template_hits"] += 1
+
     @staticmethod
     def _avg(total_ms: float, count: int) -> float:
         """
@@ -268,6 +347,7 @@ class RuntimeMetrics:
             db_count = int(self.db_queries["count"])
             cache_get_count = int(self.cache["hits"] + self.cache["misses"])
             llm_call_count = int(self.llm["sync_calls"] + self.llm["stream_calls"] + self.llm["tool_loop_calls"])
+            llm_sql_execution_count = int(self.llm_sql["execution_success"] + self.llm_sql["execution_failed"])
             uptime_seconds = round(time.time() - self.started_at, 2)
 
             return {
@@ -301,6 +381,21 @@ class RuntimeMetrics:
                     "maxFirstTokenMs": round(self.llm["max_first_token_ms"], 2),
                 },
                 "tools": tool_calls,
+                "llmSql": {
+                    "validationSuccess": int(self.llm_sql["validation_success"]),
+                    "validationFailed": int(self.llm_sql["validation_failed"]),
+                    "executionSuccess": int(self.llm_sql["execution_success"]),
+                    "executionFailed": int(self.llm_sql["execution_failed"]),
+                    "fallbacks": int(self.llm_sql["fallbacks"]),
+                    "cacheHits": int(self.llm_sql["cache_hits"]),
+                    "cacheMisses": int(self.llm_sql["cache_misses"]),
+                    "templateHits": int(self.llm_sql["template_hits"]),
+                    "generatedPromptTokens": int(self.llm_sql["generated_prompt_tokens"]),
+                    "generatedCompletionTokens": int(self.llm_sql["generated_completion_tokens"]),
+                    "generatedTotalTokens": int(self.llm_sql["generated_total_tokens"]),
+                    "avgExecutionMs": self._avg(self.llm_sql["execution_total_ms"], llm_sql_execution_count),
+                    "maxExecutionMs": round(self.llm_sql["max_execution_ms"], 2),
+                },
             }
 
 

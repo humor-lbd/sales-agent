@@ -607,10 +607,12 @@ class SalesTools:
         recent_start = today - timedelta(weeks=2)
         base_start = today - timedelta(weeks=6)
         base_end = today - timedelta(weeks=2, days=1)
+        recent_counts = self.service.query_order_count_map(recent_start, today)
+        base_counts = self.service.query_order_count_map(base_start, base_end)
         result = []
         for region in self.service.regions():
-            recent_count = self.service.query_order_count(region.id, recent_start, today)
-            base_count = self.service.query_order_count(region.id, base_start, base_end)
+            recent_count = recent_counts.get(region.id, 0)
+            base_count = base_counts.get(region.id, 0)
             base_avg = base_count / 2.0
             if base_avg < 2:
                 continue
@@ -635,9 +637,10 @@ class SalesTools:
             异常列表
         """
         today = date.today()
+        last_sale_map = self.service.query_last_order_date_map()
         result = []
         for product in self.service.active_products():
-            last_sale = self.service.query_last_order_date(product.id)
+            last_sale = last_sale_map.get(product.id)
             if last_sale is None:
                 continue
             days_without_sale = (today - last_sale).days
@@ -691,10 +694,12 @@ class SalesTools:
         current_start = today - timedelta(days=30)
         previous_start = today - timedelta(days=60)
         previous_end = today - timedelta(days=31)
+        current_amounts = self.service.sum_amount_by_rep_map(current_start, today)
+        previous_amounts = self.service.sum_amount_by_rep_map(previous_start, previous_end)
         result = []
         for rep in self.service.sales_reps():
-            current = self.service.sum_amount_by_rep(rep.id, current_start, today)
-            previous = self.service.sum_amount_by_rep(rep.id, previous_start, previous_end)
+            current = current_amounts.get(rep.id, Decimal("0"))
+            previous = previous_amounts.get(rep.id, Decimal("0"))
             growth = self.service.calc_growth_rate(current, previous)
             if growth is None:
                 continue

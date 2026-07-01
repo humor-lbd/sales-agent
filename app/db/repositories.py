@@ -432,21 +432,22 @@ class SalesOrderRepository:
             stmt = stmt.where(SalesOrder.region_id == region_id)
         return [(month, Decimal(str(total)), int(count)) for month, total, count in self.db.execute(stmt).all()]
 
-    def find_last_order_date_by_product(self, product_id: int):
+    def find_last_order_date_by_product_map(self) -> dict[int, date]:
         """
-        获取产品的最后订单日期
-        
-        Args:
-            product_id: 产品ID
-        
+        批量获取活跃产品的最后订单日期。
+
         Returns:
-            最后订单日期，未找到则返回None
+            {产品ID: 最后订单日期}
         """
-        stmt = select(func.max(SalesOrder.order_date)).where(
-            SalesOrder.product_id == product_id,
-            SalesOrder.status == "COMPLETED",
+        stmt = (
+            select(
+                SalesOrder.product_id,
+                func.max(SalesOrder.order_date).label("last_order_date"),
+            )
+            .where(SalesOrder.status == "COMPLETED")
+            .group_by(SalesOrder.product_id)
         )
-        return self.db.scalar(stmt)
+        return {int(product_id): last_order_date for product_id, last_order_date in self.db.execute(stmt).all() if product_id is not None}
 
     def find_refund_rate_by_rep(self, start: date, end: date) -> list[tuple[int, int, int]]:
         """
@@ -471,21 +472,54 @@ class SalesOrderRepository:
         )
         return [(int(rep_id), int(refunded), int(total)) for rep_id, refunded, total in self.db.execute(stmt).all()]
 
-    def count_completed_by_region(self, region_id: int, start: date, end: date) -> int:
+    def count_completed_by_region_map(self, start: date, end: date) -> dict[int, int]:
         """
-        统计指定区域的已完成订单数
-        
+        批量统计各区域的已完成订单数。
+
         Args:
-            region_id: 区域ID
             start: 开始日期
             end: 结束日期
-        
+
         Returns:
-            已完成订单数
+            {区域ID: 订单数}
         """
-        stmt = select(func.count(SalesOrder.id)).where(
-            SalesOrder.region_id == region_id,
-            SalesOrder.status == "COMPLETED",
-            SalesOrder.order_date.between(start, end),
+        stmt = (
+            select(
+                SalesOrder.region_id,
+                func.count(SalesOrder.id).label("order_count"),
+            )
+            .where(
+                SalesOrder.status == "COMPLETED",
+                SalesOrder.order_date.between(start, end),
+            )
+            .group_by(SalesOrder.region_id)
         )
-        return int(self.db.scalar(stmt) or 0)
+        return {int(region_id): int(order_count) for region_id, order_count in self.db.execute(stmt).all() if region_id is not None}
+
+    def sum_amount_by_rep_map(self, start: date, end: date) -> dict[int, Decimal]:
+        """
+        批量统计各销售代表的销售额。
+
+        Args:
+            start: 开始日期
+            end: 结束日期
+
+        Returns:
+            {销售代表ID: 销售额}
+        """
+        stmt = (
+            select(
+                SalesOrder.rep_id,
+                func.coalesce(func.sum(SalesOrder.amount), 0).label("total_amount"),
+            )
+            .where(
+                SalesOrder.status == "COMPLETED",
+                SalesOrder.order_date.between(start, end),
+            )
+            .group_by(SalesOrder.rep_id)
+        )
+        return {
+            int(rep_id): Decimal(str(total_amount))
+            for rep_id, total_amount in self.db.execute(stmt).all()
+            if rep_id is not None
+        }

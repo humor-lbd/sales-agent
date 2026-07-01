@@ -142,13 +142,13 @@ class FakeService:
         """
         return []
 
-    def query_last_order_date(self, product_id):
+    def query_last_order_date_map(self):
         """
-        作用：执行query_last_order_date对应的业务逻辑。
-        参数：product_id。
+        作用：执行query_last_order_date_map对应的业务逻辑。
+        参数：无。
         返回：函数执行后的结果。
         """
-        return None
+        return {}
 
     def query_refund_rates(self, start, end):
         """
@@ -166,13 +166,13 @@ class FakeService:
         """
         return []
 
-    def sum_amount_by_rep(self, rep_id, start, end):
+    def sum_amount_by_rep_map(self, start, end):
         """
-        作用：执行sum_amount_by_rep对应的业务逻辑。
-        参数：rep_id、start、end。
+        作用：执行sum_amount_by_rep_map对应的业务逻辑。
+        参数：start、end。
         返回：函数执行后的结果。
         """
-        return Decimal("0")
+        return {}
 
     def regions(self):
         """
@@ -181,6 +181,14 @@ class FakeService:
         返回：函数执行后的结果。
         """
         return []
+
+    def query_order_count_map(self, start, end):
+        """
+        作用：执行query_order_count_map对应的业务逻辑。
+        参数：start、end。
+        返回：函数执行后的结果。
+        """
+        return {}
 
 
 # 定义函数 test_sales_summary，负责当前文件中的一个关键步骤或对外能力。

@@ -27,6 +27,7 @@ from app.graph.helpers import (
     stream_text_chunks,
 )
 from app.graph.middleware import AgentMiddleware
+from app.graph.utils import last_ai_message
 from app.graph.nodes.bootstrap import bootstrap_node
 from app.graph.nodes.error_handler import build_error_state
 from app.graph.nodes.guardrails import guardrails_node
@@ -108,22 +109,6 @@ class SalesAgent:
             )
             return error_state
 
-    @staticmethod
-    def _last_ai_message(messages: list[Any]) -> Any | None:
-        """
-        从ReAct消息列表中找出最后一条模型消息
-        
-        Args:
-            messages: 消息列表
-        
-        Returns:
-            最后一条AI消息或None
-        """
-        for item in reversed(messages):
-            if item.__class__.__name__ == "AIMessage":
-                return item
-        return None
-
     @classmethod
     def _status_from_graph_update(cls, node_name: str, update: dict[str, Any]) -> str | None:
         """
@@ -141,7 +126,7 @@ class SalesAgent:
         if node_name == "guardrails":
             return "正在检查问题边界..."
         if node_name == "react_agent":
-            ai_message = cls._last_ai_message(update.get("react_messages") or [])
+            ai_message = last_ai_message(update.get("react_messages") or [])
             tool_calls = getattr(ai_message, "tool_calls", None) or []
             if tool_calls:
                 names = "、".join(call.get("name", "unknown") for call in tool_calls)

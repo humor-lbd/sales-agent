@@ -19,6 +19,7 @@ from app.graph.context import AgentContext
 from app.graph.middleware import AgentMiddleware
 from app.graph.react_tools import build_react_tools
 from app.graph.state import GraphState
+from app.graph.utils import get_middleware, last_ai_message
 
 
 def _tool_map(runtime: Runtime[AgentContext]) -> dict[str, StructuredTool]:
@@ -43,22 +44,6 @@ def _tool_map(runtime: Runtime[AgentContext]) -> dict[str, StructuredTool]:
     return tool_map
 
 
-def _get_middleware(runtime: Runtime[AgentContext]) -> AgentMiddleware:
-    middleware = runtime.context.get("middleware")
-    if isinstance(middleware, AgentMiddleware):
-        return middleware
-    middleware = AgentMiddleware(
-        runtime.context["settings"],
-        str(runtime.context.get("request_id", "local")),
-        runtime.context.get("stream_sink"),
-    )
-    try:
-        runtime.context["middleware"] = middleware
-    except Exception:
-        pass
-    return middleware
-
-
 def _result_to_message_text(result: Any) -> tuple[str, dict | None]:
     """
     作用：把工具返回值拆成给模型看的文本和给前端看的 artifact。
@@ -74,18 +59,6 @@ def _result_to_message_text(result: Any) -> tuple[str, dict | None]:
     return str(result), None
 
 
-def _last_ai_message(messages: list[Any]) -> AIMessage | None:
-    """
-    作用：找到最近一次 AIMessage。
-    参数：messages。
-    返回：AIMessage 或 None。
-    """
-    for message in reversed(messages):
-        if isinstance(message, AIMessage):
-            return message
-    return None
-
-
 def react_tool_executor_node(state: GraphState, runtime: Runtime[AgentContext]) -> GraphState:
     """
     作用：执行模型请求的工具调用，并追加 ToolMessage。
@@ -93,7 +66,7 @@ def react_tool_executor_node(state: GraphState, runtime: Runtime[AgentContext]) 
     返回：更新后的 GraphState。
     """
     messages = list(state.get("react_messages") or [])
-    ai_message = _last_ai_message(messages)
+    ai_message = last_ai_message(messages)
     if ai_message is None:
         return {
             "react_messages": messages,
@@ -106,7 +79,7 @@ def react_tool_executor_node(state: GraphState, runtime: Runtime[AgentContext]) 
     result_texts: list[str] = []
     executed_count = int(state.get("tool_call_count") or 0)
     settings = runtime.context["settings"]
-    middleware = _get_middleware(runtime)
+    middleware = get_middleware(runtime)
     max_tool_calls = max(int(settings.agent_max_tool_calls), 1)
 
     for call in tool_calls:

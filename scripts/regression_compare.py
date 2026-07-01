@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from _common import build_headers
+
 
 @dataclass
 # 定义类 Case，把当前文件相关的状态或能力封装起来，便于在其他模块中复用。
@@ -54,16 +56,6 @@ CASES = [
         compare_mode="chart",
     ),
 ]
-
-
-# 定义函数 build_headers，负责组装当前步骤需要的对象或参数。
-def build_headers(token: str | None) -> dict[str, str]:
-    """
-    作用：构建headers对象或结构。
-    参数：token。
-    返回：函数执行后的结果。
-    """
-    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 # 定义函数 normalize_text，负责把输入整理成统一格式，方便后续处理。

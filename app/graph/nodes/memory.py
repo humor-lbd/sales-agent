@@ -15,6 +15,7 @@ from app.graph.helpers import build_chat_model
 from app.graph.middleware import AgentMiddleware
 from app.graph.prompts import MEMORY_SUMMARY_SYSTEM_PROMPT
 from app.graph.state import GraphState
+from app.graph.utils import content_to_text, get_middleware
 from langgraph.runtime import Runtime
 
 
@@ -93,25 +94,6 @@ def _compact_history_text(text: str, max_chars: int) -> str:
     return f"{compact[:max_chars]}..."
 
 
-def _content_to_text(content: Any) -> str:
-    """
-    作用：把模型返回内容统一压平成纯文本。
-    参数：content。
-    返回：文本。
-    """
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "".join(parts).strip()
-    return str(content).strip() if content is not None else ""
-
-
 def _format_history_for_summary(messages: list[dict], max_chars: int) -> str:
     """
     作用：把更早历史整理成适合给摘要模型消费的文本。
@@ -151,18 +133,6 @@ def _build_summary_context(messages: list[dict], keep_recent: int, summary_items
     if not lines:
         return None
     return "更早对话摘要：\n" + "\n".join(lines)
-
-
-def _get_middleware(runtime: Runtime[AgentContext]) -> AgentMiddleware | None:
-    """
-    作用：获取当前请求共用的 AgentMiddleware。
-    参数：runtime。
-    返回：AgentMiddleware 或 None。
-    """
-    middleware = runtime.context.get("middleware")
-    if isinstance(middleware, AgentMiddleware):
-        return middleware
-    return None
 
 
 def _get_memory_summary_llm(runtime: Runtime[AgentContext]):
@@ -208,7 +178,7 @@ def _build_llm_summary_context(
     if not history_text:
         return None
 
-    middleware = _get_middleware(runtime)
+    middleware = get_middleware(runtime)
     try:
         llm = _get_memory_summary_llm(runtime)
         response = llm.invoke(
@@ -217,7 +187,7 @@ def _build_llm_summary_context(
                 HumanMessage(content=history_text),
             ]
         )
-        summary = _content_to_text(getattr(response, "content", response))
+        summary = content_to_text(getattr(response, "content", response))
         if not summary or summary == "无":
             return None
         middleware and middleware.trace("记忆压缩使用 LLM 摘要", {"older_messages": len(older_messages)})
@@ -255,7 +225,7 @@ def load_memory_node(state: GraphState, runtime: Runtime[AgentContext]) -> Graph
         )
     if summary_context is None:
         summary_context = _build_summary_context(messages, keep_recent, summary_items, max_chars)
-        middleware = _get_middleware(runtime)
+        middleware = get_middleware(runtime)
         if summary_context:
             middleware and middleware.trace("记忆压缩使用规则摘要", {"older_messages": max(len(messages) - keep_recent, 0)})
 

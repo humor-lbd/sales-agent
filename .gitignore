@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+pytest-cache-files-*/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -39,5 +40,6 @@ build/
 # Editor and OS files
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db

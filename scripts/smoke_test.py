@@ -10,15 +10,7 @@ import time
 
 import httpx
 
-
-# 定义函数 build_headers，负责组装当前步骤需要的对象或参数。
-def build_headers(token: str | None) -> dict[str, str]:
-    """
-    作用：构建headers对象或结构。
-    参数：token。
-    返回：函数执行后的结果。
-    """
-    return {"Authorization": f"Bearer {token}"} if token else {}
+from _common import build_headers
 
 
 # 定义函数 run_health_check，负责执行当前场景下的一段主流程。

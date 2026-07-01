@@ -8,25 +8,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from langchain_openai import ChatOpenAI
-
-from app.core.config import Settings
-
-
-# 定义函数 build_chat_model，负责组装当前步骤需要的对象或参数。
-def build_chat_model(settings: Settings, temperature: float = 0.1, model_name: str | None = None) -> ChatOpenAI:
-    """
-    作用：构建chat_model对象或结构。
-    参数：settings、temperature、model_name。
-    返回：函数执行后的结果。
-    """
-    return ChatOpenAI(
-        model=model_name or settings.openai_model,
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url,
-        timeout=settings.openai_timeout_seconds,
-        temperature=temperature,
-    )
+from app.core.llm import build_chat_model  # re-export 保持向后兼容
 
 
 # 定义函数 stream_text_chunks，负责当前文件中的一个关键步骤或对外能力。

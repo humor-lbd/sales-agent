@@ -20,44 +20,7 @@ from app.graph.middleware import AgentMiddleware
 from app.graph.prompts import REACT_SYSTEM_PROMPT
 from app.graph.react_tools import build_react_tools
 from app.graph.state import GraphState
-
-
-def _content_to_text(content: Any) -> str:
-    """
-    作用：把模型消息内容转换为普通文本。
-    参数：content。
-    返回：文本内容。
-    """
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "".join(parts).strip()
-    return str(content).strip() if content is not None else ""
-
-
-def _content_to_stream_text(content: Any) -> str:
-    """
-    作用：把流式 chunk 内容转换成文本，同时保留前后空白，避免 token 拼接失真。
-    参数：content。
-    返回：chunk 文本。
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "".join(parts)
-    return str(content) if content is not None else ""
+from app.graph.utils import content_to_text, get_middleware
 
 
 def _strip_chart_claims_without_artifact(answer: str) -> str:
@@ -157,25 +120,6 @@ def _build_system_message(runtime: Runtime[AgentContext], state: GraphState) -> 
     )
 
 
-def _get_middleware(runtime: Runtime[AgentContext]) -> AgentMiddleware:
-    """
-    作用：获取当前请求复用的 middleware。
-    参数：runtime。
-    返回：AgentMiddleware。
-    """
-    middleware = runtime.context.get("middleware")
-    if isinstance(middleware, AgentMiddleware):
-        return middleware
-    middleware = AgentMiddleware(
-        runtime.context["settings"],
-        str(runtime.context.get("request_id", "local")),
-        runtime.context.get("stream_sink"),
-    )
-    try:
-        runtime.context["middleware"] = middleware
-    except Exception:
-        pass
-    return middleware
 
 
 def _get_react_tools(runtime: Runtime[AgentContext]) -> list[Any]:
@@ -234,7 +178,7 @@ def _normalize_ai_response(response: Any) -> AIMessage:
     if isinstance(response, AIMessage):
         return response
     return AIMessage(
-        content=_content_to_text(getattr(response, "content", response)),
+        content=content_to_text(getattr(response, "content", response)),
         tool_calls=getattr(response, "tool_calls", None) or [],
     )
 
@@ -252,12 +196,12 @@ def _finalize_react_turn(
     参数：state、runtime、messages、response、round_no、streamed_final_answer。
     返回：更新后的 GraphState。
     """
-    middleware = _get_middleware(runtime)
+    middleware = get_middleware(runtime)
     messages.append(response)
     tool_calls = getattr(response, "tool_calls", None) or []
     middleware.on_llm_round(
         round_no,
-        _content_to_text(response.content) or "<空>",
+        content_to_text(response.content) or "<空>",
         [{"name": call.get("name"), "args": call.get("args") or {}} for call in tool_calls] if tool_calls else "无",
     )
 
@@ -280,7 +224,7 @@ def _finalize_react_turn(
             "streamed_final_answer": False,
         }
 
-    final_answer = _content_to_text(response.content)
+    final_answer = content_to_text(response.content)
     if not final_answer:
         tool_text = (state.get("tool_results") or {}).get("text") or ""
         final_answer = tool_text or "已完成销售数据分析。"
@@ -328,7 +272,7 @@ def stream_react_agent_node(state: GraphState, runtime: Runtime[AgentContext]) -
     if not hasattr(llm_with_tools, "stream") or _is_chart_only_request(str(state.get("request_text", ""))):
         return react_agent_node(state, runtime)
 
-    middleware = _get_middleware(runtime)
+    middleware = get_middleware(runtime)
     messages = _ensure_react_messages(state)
     payload = [_build_system_message(runtime, state), *messages]
     started = time.perf_counter()
@@ -341,7 +285,7 @@ def stream_react_agent_node(state: GraphState, runtime: Runtime[AgentContext]) -
         response_chunk = chunk if response_chunk is None else response_chunk + chunk
         if getattr(chunk, "tool_call_chunks", None) or getattr(chunk, "tool_calls", None):
             saw_tool_calls = True
-        text = _content_to_stream_text(getattr(chunk, "content", None))
+        text = content_to_text(getattr(chunk, "content", None), strip=False)
         if text and not saw_tool_calls:
             if not reply_started:
                 reply_started = True

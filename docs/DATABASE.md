@@ -139,6 +139,15 @@ Python 版默认复用 Java 项目的 MySQL 表结构，不额外引入不兼容
 - 回归测试时更容易做结果比对
 - 不必在迁移首版就引入 Alembic
 
+补充业务场景数据：
+
+- `app/db/sql/scenario_coverage.sql`：在已有 seed 基础上追加 `ORD-SC-*` 订单，覆盖本月汇总、排行、趋势、同比、环比、图表、异常检测和权限范围。
+- `scripts/load_scenario_data.py`：加载并校验补充数据，适合演示、联调和回归前执行。
+- `docs/SCENARIO_DATA.md`：说明每类业务场景对应的数据来源和验证问句。
+- `app/db/sql/jiusen_scenario_coverage.sql`：基于山西玖森百立科技服务有限公司“咪婴伴侣”业务追加 `ORD-JS-*` 订单、`SKU-JS-*` 产品和 9100 段销售/服务人员。
+- `scripts/load_jiusen_scenario_data.py`：加载并校验玖森百立业务场景数据。
+- `docs/JIUSEN_SCENARIO_DATA.md`：说明母婴 O2O、产后修复、陪诊、母婴商城、直播电商等场景如何覆盖项目工具。
+
 <!-- 下方章节继续展开当前文档的一个核心主题，阅读时建议结合实际代码一起看。 -->
 ## 数据使用边界
 
